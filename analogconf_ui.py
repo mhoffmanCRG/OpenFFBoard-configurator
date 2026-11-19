@@ -203,6 +203,8 @@ class AnalogOptionsDialog(OptionsDialog):
             self.dialog = (CANAnalogConf(name,self.main))
         if(id == 2): # ADS111X
             self.dialog = (ADS111XAnalogConf(name,self.main))
+        if(id == 3): # HX711
+            self.dialog = (HX711AnalogConf(name,self.main))
 
         OptionsDialog.__init__(self, self.dialog,main)
 
@@ -460,3 +462,142 @@ class ADS111XAnalogConf(OptionsDialogGroupBox,CommunicationHandler):
         self.get_value_async("adsAnalog","rate",self.samplerateCombobox.setCurrentIndex,0,conversion=int)
         self.get_value_async("adsAnalog","diff",self.diffCb.setChecked,0,conversion=int)
         self.get_value_async("adsAnalog","inputs",self.numChannelChanged,0,conversion=int)
+
+
+class HX711AnalogConf(OptionsDialogGroupBox,CommunicationHandler):
+    """HX711 load cell ADC source. One axis per chip. Chip pins are fixed by the firmware target."""
+    MAX_CHIPS = 4
+
+    def __init__(self,name,main):
+        self.main = main
+        OptionsDialogGroupBox.__init__(self,name,main)
+        CommunicationHandler.__init__(self)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.updateStatus)
+
+    def initUI(self):
+        layout = QFormLayout()
+
+        self.processingOptions = AnalogProcessingOptions(self,"hx711",0,filter=True,autoscale=True,values=True,manual_tune=True,channels = 1)
+        layout.addRow(self.processingOptions)
+
+        self.numChipsBox = QSpinBox()
+        self.numChipsBox.setMinimum(1)
+        self.numChipsBox.setMaximum(1)
+        self.numChipsBox.valueChanged.connect(self.updateInvertBoxes)
+        layout.addRow("Number of chips",self.numChipsBox)
+
+        self.gainCombobox = QComboBox()
+        layout.addRow("Channel/gain:",self.gainCombobox)
+
+        self.shiftBox = QSpinBox()
+        self.shiftBox.setRange(0,15)
+        self.shiftBox.setToolTip("Axis = (counts - tare) >> shift.\n8 maps the full 24 bit range to 16 bit.\nPedal mode: 100% at 65534 shifted counts.\nLower values give more resolution but clip at 32767.")
+        layout.addRow("Count shift (bits)",self.shiftBox)
+
+        invertLayout = QHBoxLayout()
+        self.invertBoxes = []
+        for i in range(self.MAX_CHIPS):
+            cb = QCheckBox(str(i+1))
+            self.invertBoxes.append(cb)
+            invertLayout.addWidget(cb)
+        invertWidget = QWidget()
+        invertWidget.setLayout(invertLayout)
+        invertLayout.setContentsMargins(0,0,0,0)
+        layout.addRow("Invert chip",invertWidget)
+
+        pedalLayout = QHBoxLayout()
+        self.pedalBoxes = []
+        for i in range(self.MAX_CHIPS):
+            cb = QCheckBox(str(i+1))
+            self.pedalBoxes.append(cb)
+            pedalLayout.addWidget(cb)
+        pedalWidget = QWidget()
+        pedalWidget.setLayout(pedalLayout)
+        pedalLayout.setContentsMargins(0,0,0,0)
+        pedalWidget.setToolTip("Pedal mode (brake/clutch): no load = 0%, pressing = up to 100%.\nUnchecked: no load = 50% (load cell can be pushed and pulled).")
+        layout.addRow("0% at no load",pedalWidget)
+
+        self.autotareCb = QCheckBox("Tare on startup")
+        self.tareButton = QPushButton("Tare now")
+        self.tareButton.setToolTip("Zero all chips with the load cells unloaded")
+        self.tareButton.clicked.connect(lambda : self.send_value("hx711","tare",1))
+        layout.addRow(self.autotareCb,self.tareButton)
+
+        self.statusLabel = QLabel("")
+        layout.addRow("Status:",self.statusLabel)
+        layout.addRow(QLabel("Pins are set by the firmware target (HX711_PINS).\nChips sharing a SCK pin are read together.\nRATE pin: low = 10 SPS, high = 80 SPS."))
+
+        self.setLayout(layout)
+        self.updateInvertBoxes(1)
+
+    def showEvent(self,event):
+        self.timer.start(500)
+
+    def hideEvent(self,event):
+        self.timer.stop()
+
+    def onclose(self):
+        self.timer.stop()
+        self.remove_callbacks()
+
+    def updateInvertBoxes(self,chips):
+        for i,cb in enumerate(self.invertBoxes):
+            cb.setEnabled(i < chips)
+        for i,cb in enumerate(self.pedalBoxes):
+            cb.setEnabled(i < chips)
+
+    def numChipsChanged(self,chips):
+        self.processingOptions.setChannels(chips)
+        self.numChipsBox.setValue(chips)
+
+    def invertCb(self,mask):
+        for i,cb in enumerate(self.invertBoxes):
+            cb.setChecked((mask >> i) & 1 == 1)
+
+    def pedalCb(self,mask):
+        for i,cb in enumerate(self.pedalBoxes):
+            cb.setChecked((mask >> i) & 1 == 1)
+
+    def updateStatus(self):
+        self.get_value_async("hx711","status",self.statusCb,0,conversion=int)
+
+    def statusCb(self,mask):
+        self.get_value_async("hx711","counts",lambda c : self.countsCb(mask,c),0,conversion=str)
+
+    def countsCb(self,mask,countstr):
+        counts = [c for c in str(countstr).split("\n") if c.strip() != ""]
+        parts = []
+        for i,c in enumerate(counts):
+            state = c if (mask >> i) & 1 else "not connected"
+            parts.append(f"{i+1}: {state}")
+        self.statusLabel.setText("  ".join(parts))
+
+    def apply(self):
+        self.send_value("hx711","chips",self.numChipsBox.value())
+        self.send_value("hx711","gain",int(self.gainCombobox.currentData()))
+        self.send_value("hx711","shift",self.shiftBox.value())
+        mask = 0
+        for i,cb in enumerate(self.invertBoxes):
+            if cb.isChecked():
+                mask |= 1 << i
+        self.send_value("hx711","invert",mask)
+        mask = 0
+        for i,cb in enumerate(self.pedalBoxes):
+            if cb.isChecked():
+                mask |= 1 << i
+        self.send_value("hx711","pedal",mask)
+        self.send_value("hx711","autotare",1 if self.autotareCb.isChecked() else 0)
+        self.processingOptions.setChannels(self.numChipsBox.value())
+        self.processingOptions.apply()
+
+    def readValues(self):
+        self.processingOptions.readValues()
+        self.get_value_async("hx711","maxchips",self.numChipsBox.setMaximum,0,conversion=int)
+        self.get_value_async("hx711","gain",lambda d : updateListComboBox(self.gainCombobox,d),0,typechar='!')
+        self.get_value_async("hx711","gain",self.gainCombobox.setCurrentIndex,0,conversion=int)
+        self.get_value_async("hx711","shift",self.shiftBox.setValue,0,conversion=int)
+        self.get_value_async("hx711","invert",self.invertCb,0,conversion=int)
+        self.get_value_async("hx711","pedal",self.pedalCb,0,conversion=int)
+        self.get_value_async("hx711","autotare",self.autotareCb.setChecked,0,conversion=int)
+        self.get_value_async("hx711","chips",self.numChipsChanged,0,conversion=int)
