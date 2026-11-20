@@ -487,36 +487,50 @@ class HX711AnalogConf(OptionsDialogGroupBox,CommunicationHandler):
         self.numChipsBox.valueChanged.connect(self.updateInvertBoxes)
         layout.addRow("Number of chips",self.numChipsBox)
 
-        self.gainCombobox = QComboBox()
-        layout.addRow("Channel/gain:",self.gainCombobox)
+        # Per chip settings: one column per chip
+        chipGrid = QGridLayout()
+        chipGrid.setContentsMargins(0,0,0,0)
+        gainLabel = QLabel("Channel/gain")
+        gainLabel.setToolTip("HX711 input channel and gain per chip.\nChips sharing a SCK pin get the same clock pulses,\nso changing one also changes the others on that pin.")
+        shiftLabel = QLabel("Count shift (bits)")
+        shiftLabel.setToolTip("Axis = (counts - tare) >> shift.\n8 maps the full 24 bit range to 16 bit.\nPedal mode: 100% at 65534 shifted counts.\nLower values give more resolution but clip at 32767.")
+        pedalLabel = QLabel("0% at no load")
+        pedalLabel.setToolTip("Pedal mode (brake/clutch): no load = 0%, pressing = up to 100%.\nUnchecked: no load = 50% (load cell can be pushed and pulled).")
+        for row,label in enumerate([QLabel("Chip"),gainLabel,shiftLabel,QLabel("Invert"),pedalLabel]):
+            chipGrid.addWidget(label,row,0)
 
-        self.shiftBox = QSpinBox()
-        self.shiftBox.setRange(0,15)
-        self.shiftBox.setToolTip("Axis = (counts - tare) >> shift.\n8 maps the full 24 bit range to 16 bit.\nPedal mode: 100% at 65534 shifted counts.\nLower values give more resolution but clip at 32767.")
-        layout.addRow("Count shift (bits)",self.shiftBox)
-
-        invertLayout = QHBoxLayout()
+        self.gainBoxes = []
+        self.shiftBoxes = []
         self.invertBoxes = []
-        for i in range(self.MAX_CHIPS):
-            cb = QCheckBox(str(i+1))
-            self.invertBoxes.append(cb)
-            invertLayout.addWidget(cb)
-        invertWidget = QWidget()
-        invertWidget.setLayout(invertLayout)
-        invertLayout.setContentsMargins(0,0,0,0)
-        layout.addRow("Invert chip",invertWidget)
-
-        pedalLayout = QHBoxLayout()
         self.pedalBoxes = []
+        self.sckShare = [1 << i for i in range(self.MAX_CHIPS)] # Chips sharing each chip's SCK pin
         for i in range(self.MAX_CHIPS):
-            cb = QCheckBox(str(i+1))
+            chipGrid.addWidget(QLabel(str(i+1)),0,i+1,Qt.AlignmentFlag.AlignHCenter)
+
+            gainBox = QComboBox()
+            gainBox.currentIndexChanged.connect(lambda idx,chip=i : self.gainChanged(chip,idx))
+            self.gainBoxes.append(gainBox)
+            chipGrid.addWidget(gainBox,1,i+1)
+
+            shiftBox = QSpinBox()
+            shiftBox.setRange(0,15)
+            shiftBox.setValue(8)
+            shiftBox.setToolTip(shiftLabel.toolTip())
+            self.shiftBoxes.append(shiftBox)
+            chipGrid.addWidget(shiftBox,2,i+1)
+
+            cb = QCheckBox()
+            self.invertBoxes.append(cb)
+            chipGrid.addWidget(cb,3,i+1,Qt.AlignmentFlag.AlignHCenter)
+
+            cb = QCheckBox()
+            cb.setToolTip(pedalLabel.toolTip())
             self.pedalBoxes.append(cb)
-            pedalLayout.addWidget(cb)
-        pedalWidget = QWidget()
-        pedalWidget.setLayout(pedalLayout)
-        pedalLayout.setContentsMargins(0,0,0,0)
-        pedalWidget.setToolTip("Pedal mode (brake/clutch): no load = 0%, pressing = up to 100%.\nUnchecked: no load = 50% (load cell can be pushed and pulled).")
-        layout.addRow("0% at no load",pedalWidget)
+            chipGrid.addWidget(cb,4,i+1,Qt.AlignmentFlag.AlignHCenter)
+
+        chipWidget = QWidget()
+        chipWidget.setLayout(chipGrid)
+        layout.addRow(chipWidget)
 
         self.autotareCb = QCheckBox("Tare on startup")
         self.tareButton = QPushButton("Tare now")
@@ -542,10 +556,31 @@ class HX711AnalogConf(OptionsDialogGroupBox,CommunicationHandler):
         self.remove_callbacks()
 
     def updateInvertBoxes(self,chips):
-        for i,cb in enumerate(self.invertBoxes):
-            cb.setEnabled(i < chips)
-        for i,cb in enumerate(self.pedalBoxes):
-            cb.setEnabled(i < chips)
+        for boxes in (self.gainBoxes,self.shiftBoxes,self.invertBoxes,self.pedalBoxes):
+            for i,w in enumerate(boxes):
+                w.setEnabled(i < chips)
+
+    def gainChanged(self,chip,idx):
+        """Chips on the same SCK pin always use the same channel/gain. Mirror the change to them."""
+        if idx < 0:
+            return
+        for i,box in enumerate(self.gainBoxes):
+            if i != chip and (self.sckShare[chip] >> i) & 1 and box.count() > idx and box.currentIndex() != idx:
+                box.setCurrentIndex(idx)
+
+    def gainInfoCb(self,reply):
+        for box in self.gainBoxes:
+            updateListComboBox(box,reply)
+
+    def sckShareCb(self,chip,mask):
+        self.sckShare[chip] = mask | (1 << chip)
+
+    def maxChipsCb(self,maxchips):
+        self.numChipsBox.setMaximum(maxchips)
+        for i in range(min(maxchips,self.MAX_CHIPS)):
+            self.get_value_async("hx711","sckshare",lambda m,chip=i : self.sckShareCb(chip,m),0,conversion=int,adr=i)
+            self.get_value_async("hx711","gain",self.gainBoxes[i].setCurrentIndex,0,conversion=int,adr=i)
+            self.get_value_async("hx711","shift",self.shiftBoxes[i].setValue,0,conversion=int,adr=i)
 
     def numChipsChanged(self,chips):
         self.processingOptions.setChannels(chips)
@@ -575,8 +610,10 @@ class HX711AnalogConf(OptionsDialogGroupBox,CommunicationHandler):
 
     def apply(self):
         self.send_value("hx711","chips",self.numChipsBox.value())
-        self.send_value("hx711","gain",int(self.gainCombobox.currentData()))
-        self.send_value("hx711","shift",self.shiftBox.value())
+        for i in range(self.numChipsBox.value()):
+            if self.gainBoxes[i].currentData() is not None:
+                self.send_value("hx711","gain",int(self.gainBoxes[i].currentData()),adr=i)
+            self.send_value("hx711","shift",self.shiftBoxes[i].value(),adr=i)
         mask = 0
         for i,cb in enumerate(self.invertBoxes):
             if cb.isChecked():
@@ -593,10 +630,8 @@ class HX711AnalogConf(OptionsDialogGroupBox,CommunicationHandler):
 
     def readValues(self):
         self.processingOptions.readValues()
-        self.get_value_async("hx711","maxchips",self.numChipsBox.setMaximum,0,conversion=int)
-        self.get_value_async("hx711","gain",lambda d : updateListComboBox(self.gainCombobox,d),0,typechar='!')
-        self.get_value_async("hx711","gain",self.gainCombobox.setCurrentIndex,0,conversion=int)
-        self.get_value_async("hx711","shift",self.shiftBox.setValue,0,conversion=int)
+        self.get_value_async("hx711","maxchips",self.maxChipsCb,0,conversion=int)
+        self.get_value_async("hx711","gain",self.gainInfoCb,0,typechar='!')
         self.get_value_async("hx711","invert",self.invertCb,0,conversion=int)
         self.get_value_async("hx711","pedal",self.pedalCb,0,conversion=int)
         self.get_value_async("hx711","autotare",self.autotareCb.setChecked,0,conversion=int)
