@@ -9,10 +9,11 @@ from helper import res_path,classlistToIds,updateListComboBox
 from base_ui import CommunicationHandler
 
 class EncoderOptions(QGroupBox):
-    def __init__(self,main,id):
+    def __init__(self,main,id,axis=0):
         QGroupBox.__init__(self,main)
         self.widget = None
         self.main = main
+        self.axis = axis
         self.setType(id)
 
 
@@ -22,7 +23,7 @@ class EncoderOptions(QGroupBox):
         found = True
         self.setTitle("Encoder settings")
         if(id == 2): # local encoder
-            self.widget = (LocalEncoderConf(self,self.main))
+            self.widget = (LocalEncoderConf(self,self.main,self.axis))
             self.setTitle("Local Encoder")
         elif(id == 1): # tmc
             layout.addWidget(QLabel("Configure in TMC tab"))
@@ -76,8 +77,9 @@ class EncoderOption(QWidget):
         pass
 
 class LocalEncoderConf(EncoderOption,CommunicationHandler):
-    def __init__(self,parent,main):
+    def __init__(self,parent,main,axis=0):
         self.main = main
+        self.axis = axis
         EncoderOption.__init__(self,parent)
         CommunicationHandler.__init__(self)
         self.initUI()
@@ -97,14 +99,21 @@ class LocalEncoderConf(EncoderOption,CommunicationHandler):
 
         self.setLayout(layout)
 
+    def instance(self):
+        """Multi axis boards have one local encoder per axis (localenc instance = axis). Others only instance 0"""
+        classes = getattr(self.main, "board_classes", {}) or {}
+        return self.axis if f"localenc:{self.axis}" in classes else 0
+
     def onshown(self):
-        self.get_value_async("localenc","cpr",self.spinBox_cpr.setValue,0,int)
-        self.get_value_async("localenc","index",self.checkBox_index.setChecked,0,int)
+        inst = self.instance()
+        self.get_value_async("localenc","cpr",self.spinBox_cpr.setValue,inst,int)
+        self.get_value_async("localenc","index",self.checkBox_index.setChecked,inst,int)
 
     def apply(self):
+        inst = self.instance()
         val = self.spinBox_cpr.value()
-        self.send_value("localenc","cpr",val=val)
-        self.send_value("localenc","index",val = 1 if self.checkBox_index.isChecked() else 0)
+        self.send_value("localenc","cpr",val=val,instance=inst)
+        self.send_value("localenc","index",val = 1 if self.checkBox_index.isChecked() else 0,instance=inst)
 
 
 class MtEncoderConf(EncoderOption,CommunicationHandler):

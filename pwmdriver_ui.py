@@ -11,28 +11,29 @@ from base_ui import CommunicationHandler
 
 class PwmDriverUI(WidgetUI,CommunicationHandler):
     
-    def __init__(self, main=None, unique=1):
+    def __init__(self, main=None, unique=0):
         WidgetUI.__init__(self, main,'pwmdriver_ui.ui')
         CommunicationHandler.__init__(self)
         self.main = main #type: main.MainUi
+        self.instance = unique # pwmdrv instance. Multi axis boards have one PWM driver per axis
         
         self.pushButton_apply.clicked.connect(self.apply)
 
-        self.register_callback("pwmdrv","freq",self.freq_cb,0,str,typechar='!')
-        self.register_callback("pwmdrv","freq",self.comboBox_freq.setCurrentIndex,0,int,typechar='?')
+        self.register_callback("pwmdrv","freq",self.freq_cb,self.instance,str,typechar='!')
+        self.register_callback("pwmdrv","freq",self.comboBox_freq.setCurrentIndex,self.instance,int,typechar='?')
 
-        self.register_callback("pwmdrv","mode",self.pwmmode_cb,0,str,typechar='!')
-        self.register_callback("pwmdrv","mode",self.comboBox_mode.setCurrentIndex,0,int,typechar='?')
-        self.register_callback("pwmdrv","dir",self.checkBox_invert.setChecked,0,int,typechar='?')
-        self.register_callback("pwmdrv","minduty",lambda v : self.doubleSpinBox_minduty.setValue(v/10),0,int,typechar='?')
-        self.register_callback("pwmdrv","autozero",self.checkBox_autozero.setChecked,0,int,typechar='?')
-        self.pushButton_autozero.clicked.connect(lambda : self.send_value("pwmdrv","calibrate",1))
+        self.register_callback("pwmdrv","mode",self.pwmmode_cb,self.instance,str,typechar='!')
+        self.register_callback("pwmdrv","mode",self.mode_value_cb,self.instance,int,typechar='?')
+        self.register_callback("pwmdrv","dir",self.checkBox_invert.setChecked,self.instance,int,typechar='?')
+        self.register_callback("pwmdrv","minduty",lambda v : self.doubleSpinBox_minduty.setValue(v/10),self.instance,int,typechar='?')
+        self.register_callback("pwmdrv","autozero",self.checkBox_autozero.setChecked,self.instance,int,typechar='?')
+        self.pushButton_autozero.clicked.connect(lambda : self.send_value("pwmdrv","calibrate",1,instance=self.instance))
 
         # Live output info
-        self.register_callback("pwmdrv","active",lambda v : self.label_active.setText("Enabled" if v else "Disabled"),0,int)
-        self.register_callback("pwmdrv","torque",self.torque_cb,0,int)
-        self.register_callback("pwmdrv","duty",self.duty_cb,0,int)
-        self.register_callback("pwmdrv","hz",self.hz_cb,0,int)
+        self.register_callback("pwmdrv","active",lambda v : self.label_active.setText("Enabled" if v else "Disabled"),self.instance,int)
+        self.register_callback("pwmdrv","torque",self.torque_cb,self.instance,int)
+        self.register_callback("pwmdrv","duty",self.duty_cb,self.instance,int)
+        self.register_callback("pwmdrv","hz",self.hz_cb,self.instance,int)
         self.duty = None
         self.zero = None
         self.hz = None
@@ -49,22 +50,22 @@ class PwmDriverUI(WidgetUI,CommunicationHandler):
         self.label_aasd.setText(self.AASD_HELP)
         self.label_aasd.setMinimumHeight(self.label_aasd.heightForWidth(450)) # Wrapped rich text is not in the size hint
         self.update_aasd()
-        self.register_callback("pwmdrv","zero",self.zero_cb,0,int)
-        self.register_callback("pwmdrv","calstate",self.calstate_cb,0,int)
+        self.register_callback("pwmdrv","zero",self.zero_cb,self.instance,int)
+        self.register_callback("pwmdrv","calstate",self.calstate_cb,self.instance,int)
         self.calstate = 0
         self.calfail = 0
         self.calduty = 0
         self.caltravel = 0
         self.calstartv = 0
         # Diagnostics arrive before calstate in update_info so calstate_cb can show them
-        self.register_callback("pwmdrv","calfail",lambda v : setattr(self,"calfail",v),0,int)
-        self.register_callback("pwmdrv","calduty",lambda v : setattr(self,"calduty",v),0,int)
-        self.register_callback("pwmdrv","caltravel",lambda v : setattr(self,"caltravel",v),0,int)
-        self.register_callback("pwmdrv","calstartv",lambda v : setattr(self,"calstartv",v),0,int)
+        self.register_callback("pwmdrv","calfail",lambda v : setattr(self,"calfail",v),self.instance,int)
+        self.register_callback("pwmdrv","calduty",lambda v : setattr(self,"calduty",v),self.instance,int)
+        self.register_callback("pwmdrv","caltravel",lambda v : setattr(self,"caltravel",v),self.instance,int)
+        self.register_callback("pwmdrv","calstartv",lambda v : setattr(self,"calstartv",v),self.instance,int)
         self.calhigh = 0
         self.callow = 0
-        self.register_callback("pwmdrv","calhigh",lambda v : setattr(self,"calhigh",v),0,int)
-        self.register_callback("pwmdrv","callow",lambda v : setattr(self,"callow",v),0,int)
+        self.register_callback("pwmdrv","calhigh",lambda v : setattr(self,"calhigh",v),self.instance,int)
+        self.register_callback("pwmdrv","callow",lambda v : setattr(self,"callow",v),self.instance,int)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_info)
 
@@ -80,7 +81,7 @@ class PwmDriverUI(WidgetUI,CommunicationHandler):
         self.timer.stop()
 
     def update_info(self):
-        self.send_commands("pwmdrv",["active","torque","duty","hz","calfail","calduty","calhigh","callow","caltravel","calstartv","calstate","zero"],0)
+        self.send_commands("pwmdrv",["active","torque","duty","hz","calfail","calduty","calhigh","callow","caltravel","calstartv","calstate","zero"],self.instance)
 
     CALSTATES = ["Not run (using zero torque duty)","Running... let go of the wheel","OK","Failed (using zero torque duty)"]
     CALFAILS = ["","Not in PWM/DIR mode","No encoder","Motor stopped (e-stop)",
@@ -159,32 +160,39 @@ class PwmDriverUI(WidgetUI,CommunicationHandler):
 
     def init_ui(self):
         # Fill menus
-        self.send_command("pwmdrv","freq",0,'!')
-        self.send_command("pwmdrv","mode",0,'!')
-        self.send_command("pwmdrv","dir",0,'?')
-        self.send_command("pwmdrv","minduty",0,'?')
-        self.send_command("pwmdrv","autozero",0,'?')
+        self.send_command("pwmdrv","freq",self.instance,'!')
+        self.send_command("pwmdrv","mode",self.instance,'!')
+        self.send_command("pwmdrv","dir",self.instance,'?')
+        self.send_command("pwmdrv","minduty",self.instance,'?')
+        self.send_command("pwmdrv","autozero",self.instance,'?')
 
     def freq_cb(self,modes):
         self.comboBox_freq.clear()
         modes = [m.split(":") for m in modes.split("\n") if m]
         for m in modes:
             self.comboBox_freq.addItem(m[0],m[1])
-        self.send_command("pwmdrv","freq",0,'?')
+        self.send_command("pwmdrv","freq",self.instance,'?')
 
     def pwmmode_cb(self,modes):
         self.comboBox_mode.clear()
         modes = [m.split(":") for m in modes.split("\n") if m]
         for m in modes:
             self.comboBox_mode.addItem(m[0],m[1])
-        self.send_command("pwmdrv","mode",0,'?')
+        self.send_command("pwmdrv","mode",self.instance,'?')
+
+    def mode_value_cb(self,mode):
+        """Selects the entry of a mode value. Multi axis boards only list some modes, so index != value"""
+        for i in range(self.comboBox_mode.count()):
+            if int(self.comboBox_mode.itemData(i)) == mode:
+                self.comboBox_mode.setCurrentIndex(i)
+                return
 
  
     def apply(self):
-        self.send_value("pwmdrv","mode",self.comboBox_mode.currentData())
-        self.send_value("pwmdrv","freq",self.comboBox_freq.currentData())
-        self.send_value("pwmdrv","dir",1 if self.checkBox_invert.isChecked() else 0)
-        self.send_value("pwmdrv","minduty",round(self.doubleSpinBox_minduty.value()*10))
-        self.send_value("pwmdrv","autozero",1 if self.checkBox_autozero.isChecked() else 0)
+        self.send_value("pwmdrv","mode",self.comboBox_mode.currentData(),instance=self.instance)
+        self.send_value("pwmdrv","freq",self.comboBox_freq.currentData(),instance=self.instance)
+        self.send_value("pwmdrv","dir",1 if self.checkBox_invert.isChecked() else 0,instance=self.instance)
+        self.send_value("pwmdrv","minduty",round(self.doubleSpinBox_minduty.value()*10),instance=self.instance)
+        self.send_value("pwmdrv","autozero",1 if self.checkBox_autozero.isChecked() else 0,instance=self.instance)
         self.init_ui() # Update UI
 

@@ -57,6 +57,7 @@ import simplemotion_ui
 import activetasks
 import rmd_ui
 import canremote_ui
+import axes_overview_ui
 
 # This GUIs version
 VERSION = "1.17.1"
@@ -130,6 +131,7 @@ class MainUi(PyQt6.QtWidgets.QMainWindow, base_ui.WidgetUI, base_ui.Communicatio
         self.process_events_timer = PyQt6.QtCore.QTimer()
         self.process_events_timer.timeout.connect(process_events) # Kick eventloop when timeouting
         self.axes = 0
+        self.axes_overview = None # "All axes" tab when more than one axis runs
 
         self.setup()
         self.languagechanged.connect(self.restart_app)
@@ -419,6 +421,7 @@ class MainUi(PyQt6.QtWidgets.QMainWindow, base_ui.WidgetUI, base_ui.Communicatio
         self.profile_ui.set_save_btn(False)
         for i in range(self.tabWidget_main.count() - 1, 0, -1):
             self.del_tab(self.tabWidget_main.widget(i))
+        self.axes_overview = None # Deleted with the other tabs
         self.remove_callbacks()
         self.tabsinitialized.emit(False)
 
@@ -457,6 +460,7 @@ class MainUi(PyQt6.QtWidgets.QMainWindow, base_ui.WidgetUI, base_ui.Communicatio
                 }
                 for i in lines
             }
+            self.board_classes = new_active_classes # Raw list of running classes ("clsname:instance" keys)
             delete_classes = [
                 (classe, name)
                 for name, classe in self.active_classes.items()
@@ -471,7 +475,7 @@ class MainUi(PyQt6.QtWidgets.QMainWindow, base_ui.WidgetUI, base_ui.Communicatio
                 if name in self.active_classes:
                     continue
                 classname = classe_active["name"]
-                if classe_active["id"] == 1 or classe_active["id"] == 2 or classe_active["id"] == 3:
+                if classe_active["id"] in (1, 2, 3, 6): # 6 = FFB wheel + command axes
                     self.main_class_ui = ffb_ui.FfbUI(main=self, title=classname)
                     self.active_classes[name] = self.main_class_ui
                     self.profile_ui.set_save_btn(True)
@@ -501,9 +505,12 @@ class MainUi(PyQt6.QtWidgets.QMainWindow, base_ui.WidgetUI, base_ui.Communicatio
                     self.add_tab(classe, name_axis)
                     self.profile_ui.set_save_btn(True)
                 elif classe_active["id"] == 0x84:
-                    classe = pwmdriver_ui.PwmDriverUI(main=self)
+                    classe = pwmdriver_ui.PwmDriverUI(main=self, unique=classe_active["unique"])
                     self.active_classes[name] = classe
-                    self.add_tab(classe, classe_active["name"])
+                    tabname = classe_active["name"]
+                    if classe_active["unique"] > 0: # Multi axis boards: one PWM driver per axis
+                        tabname += ":" + str(classe_active["unique"])
+                    self.add_tab(classe, tabname)
                     self.profile_ui.set_save_btn(True)
                 elif classe_active["id"] == 0xD:
                     classe = midi_ui.MidiUI(main=self)
@@ -549,7 +556,7 @@ class MainUi(PyQt6.QtWidgets.QMainWindow, base_ui.WidgetUI, base_ui.Communicatio
                     self.add_tab(classe, name_axis)
                     self.profile_ui.set_save_btn(True)
 
-
+            self.update_axes_overview(new_active_classes)
 
             self.tabsinitialized.emit(True)
 
@@ -562,6 +569,18 @@ class MainUi(PyQt6.QtWidgets.QMainWindow, base_ui.WidgetUI, base_ui.Communicatio
             self.active_threads_dlg.set_taskstats_enabled(x==1) 
         self.get_value_async("sys","cmdinfo",adr=18,conversion=int,callback=cmdinfo18_cb) # Check taskstats
         self.get_value_async("sys","cmdinfo",adr=25,conversion=int,callback=lambda x:self.active_threads_dlg.set_tasklist_enabled(x==1) ) # Check taskstats
+
+    def update_axes_overview(self, classes):
+        """Shows the "All axes" tab with range and axis effects of every axis if the board runs more than one axis."""
+        axes = [c["unique"] for c in classes.values() if c["id"] == 0xA01]
+        if len(axes) > 1:
+            if self.axes_overview is None:
+                self.axes_overview = axes_overview_ui.AxesOverviewUI(main=self)
+                self.add_tab(self.axes_overview, "All axes")
+            self.axes_overview.set_axes(axes)
+        elif self.axes_overview is not None:
+            self.del_tab(self.axes_overview)
+            self.axes_overview = None
 
     def reconnect(self):
         """Reconnect the board : re-open the serial link, and check it."""

@@ -342,7 +342,7 @@ class AxisUI(WidgetUI,CommunicationHandler):
                 id = c[0]
                 creatable = c[2]
                 if(id not in self.encoder_widgets or self.stackedWidget_encoder.indexOf(self.encoder_widgets[id]) == -1):
-                    self.encoder_widgets[id] = EncoderOptions(self.main,id)
+                    self.encoder_widgets[id] = EncoderOptions(self.main,id,self.axis)
                     self.stackedWidget_encoder.addWidget(self.encoder_widgets[id])
                     self.comboBox_encoder.addItem(c[1],c[0])
                 self.comboBox_encoder.model().item(self.encoder_ids[c[0]][0]).setEnabled(creatable)
