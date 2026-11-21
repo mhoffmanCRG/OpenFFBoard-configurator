@@ -41,6 +41,58 @@
        <widget class="QComboBox" name="comboBox_freq"/>
       </item>
       <item row="5" column="0">
+       <widget class="QLabel" name="label_minduty">
+        <property name="text">
+         <string>Zero torque duty:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <widget class="QDoubleSpinBox" name="doubleSpinBox_minduty">
+        <property name="toolTip">
+         <string>PWM/DIR mode only. PWM duty at zero torque. Torque is scaled from this value to 100%.
+Keeps a PWM DAC (e.g. MMOS LTC2644) actively driving a known voltage. Zero the servo drive analog offset to this voltage.</string>
+        </property>
+        <property name="suffix">
+         <string> %</string>
+        </property>
+        <property name="decimals">
+         <number>1</number>
+        </property>
+        <property name="maximum">
+         <double>25.399999999999999</double>
+        </property>
+        <property name="singleStep">
+         <double>0.100000000000000</double>
+        </property>
+        <property name="value">
+         <double>1.000000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="0">
+       <widget class="QPushButton" name="pushButton_autozero">
+        <property name="toolTip">
+         <string>Runs auto zero now. Starts after 2s. Let go of the wheel.</string>
+        </property>
+        <property name="text">
+         <string>Run auto zero</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="1">
+       <widget class="QCheckBox" name="checkBox_autozero">
+        <property name="toolTip">
+         <string>PWM/DIR mode only. At startup, starting at the zero torque duty: if the wheel turns, ramps up fast until it stops.
+Then slowly finds the duty where it starts turning forward and where it starts turning backwards, and uses the middle as zero torque point.
+The wheel must be free and may turn up to 3 turns. Falls back to the zero torque duty above if it fails.</string>
+        </property>
+        <property name="text">
+         <string>Auto zero at startup</string>
+        </property>
+       </widget>
+      </item>
+      <item row="7" column="0">
        <widget class="QPushButton" name="pushButton_apply">
         <property name="text">
          <string>Apply</string>
@@ -65,6 +117,226 @@
     </widget>
    </item>
    <item row="1" column="0">
+    <widget class="QGroupBox" name="groupBox_info">
+     <property name="title">
+      <string>Info</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout_info">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_active_t">
+        <property name="text">
+         <string>Output:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLabel" name="label_active">
+        <property name="text">
+         <string>-</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_torque_t">
+        <property name="text">
+         <string>Torque:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QLabel" name="label_torque">
+        <property name="text">
+         <string>-</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_duty_t">
+        <property name="text">
+         <string>PWM duty:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QLabel" name="label_duty">
+        <property name="text">
+         <string>-</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_hz_t">
+        <property name="text">
+         <string>PWM frequency:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QLabel" name="label_hz">
+        <property name="text">
+         <string>-</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="label_zero_t">
+        <property name="text">
+         <string>Zero point:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QLabel" name="label_zero">
+        <property name="text">
+         <string>-</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0">
+       <widget class="QLabel" name="label_calstate_t">
+        <property name="text">
+         <string>Auto zero:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <widget class="QLabel" name="label_calstate">
+        <property name="text">
+         <string>-</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item row="0" column="1" rowspan="2">
+    <widget class="QGroupBox" name="groupBox_aasd">
+     <property name="title">
+      <string>AASD servo settings (PWM/DIR into torque mode via PWM DAC)</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout_aasd">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_dacfs_t">
+        <property name="text">
+         <string>DAC full scale:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QDoubleSpinBox" name="doubleSpinBox_dacfs">
+        <property name="toolTip">
+         <string>DAC output voltage at 100% PWM duty (servo Vref input). MMOS v2: about 3.3 V (50% duty gave 1.63 V).
+Only used to calculate the values below. Not sent to the board.</string>
+        </property>
+        <property name="suffix">
+         <string> V</string>
+        </property>
+        <property name="decimals">
+         <number>2</number>
+        </property>
+        <property name="minimum">
+         <double>0.500000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>10.000000000000000</double>
+        </property>
+        <property name="singleStep">
+         <double>0.010000000000000</double>
+        </property>
+        <property name="value">
+         <double>3.300000000000000</double>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_pn189_t">
+        <property name="text">
+         <string>Drive Pn189 (torque gain):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QSpinBox" name="spinBox_pn189">
+        <property name="toolTip">
+         <string>Enter the value set in the drive (analog torque command gain, % rated torque per volt).
+Only used to calculate the values below. Not sent to the board.</string>
+        </property>
+        <property name="suffix">
+         <string> %/V</string>
+        </property>
+        <property name="minimum">
+         <number>1</number>
+        </property>
+        <property name="maximum">
+         <number>3000</number>
+        </property>
+        <property name="value">
+         <number>100</number>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_vref_t">
+        <property name="text">
+         <string>Vref now:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QLabel" name="label_vref">
+        <property name="text">
+         <string>-</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_vzero_t">
+        <property name="text">
+         <string>Zero point Vref:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QLabel" name="label_vzero">
+        <property name="text">
+         <string>-</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="label_fulltorque_t">
+        <property name="text">
+         <string>Full torque:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QLabel" name="label_fulltorque">
+        <property name="text">
+         <string>-</string>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0" colspan="2">
+       <widget class="QLabel" name="label_aasd">
+        <property name="text">
+         <string>-</string>
+        </property>
+        <property name="textFormat">
+         <enum>Qt::RichText</enum>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item row="2" column="0" colspan="2">
     <widget class="QGroupBox" name="groupBox_2">
      <property name="sizePolicy">
       <sizepolicy hsizetype="Preferred" vsizetype="Preferred">

@@ -203,6 +203,8 @@ class AnalogOptionsDialog(OptionsDialog):
             self.dialog = (CANAnalogConf(name,self.main))
         if(id == 2): # ADS111X
             self.dialog = (ADS111XAnalogConf(name,self.main))
+        if(id == 3): # HX711
+            self.dialog = (HX711AnalogConf(name,self.main))
 
         OptionsDialog.__init__(self, self.dialog,main)
 
@@ -460,3 +462,177 @@ class ADS111XAnalogConf(OptionsDialogGroupBox,CommunicationHandler):
         self.get_value_async("adsAnalog","rate",self.samplerateCombobox.setCurrentIndex,0,conversion=int)
         self.get_value_async("adsAnalog","diff",self.diffCb.setChecked,0,conversion=int)
         self.get_value_async("adsAnalog","inputs",self.numChannelChanged,0,conversion=int)
+
+
+class HX711AnalogConf(OptionsDialogGroupBox,CommunicationHandler):
+    """HX711 load cell ADC source. One axis per chip. Chip pins are fixed by the firmware target."""
+    MAX_CHIPS = 4
+
+    def __init__(self,name,main):
+        self.main = main
+        OptionsDialogGroupBox.__init__(self,name,main)
+        CommunicationHandler.__init__(self)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.updateStatus)
+
+    def initUI(self):
+        layout = QFormLayout()
+
+        self.processingOptions = AnalogProcessingOptions(self,"hx711",0,filter=True,autoscale=True,values=True,manual_tune=True,channels = 1)
+        layout.addRow(self.processingOptions)
+
+        self.numChipsBox = QSpinBox()
+        self.numChipsBox.setMinimum(1)
+        self.numChipsBox.setMaximum(1)
+        self.numChipsBox.valueChanged.connect(self.updateInvertBoxes)
+        layout.addRow("Number of chips",self.numChipsBox)
+
+        # Per chip settings: one column per chip
+        chipGrid = QGridLayout()
+        chipGrid.setContentsMargins(0,0,0,0)
+        gainLabel = QLabel("Channel/gain")
+        gainLabel.setToolTip("HX711 input channel and gain per chip.\nChips sharing a SCK pin get the same clock pulses,\nso changing one also changes the others on that pin.")
+        shiftLabel = QLabel("Count shift (bits)")
+        shiftLabel.setToolTip("Axis = (counts - tare) >> shift.\n8 maps the full 24 bit range to 16 bit.\nPedal mode: 100% at 65534 shifted counts.\nLower values give more resolution but clip at 32767.")
+        pedalLabel = QLabel("0% at no load")
+        pedalLabel.setToolTip("Pedal mode (brake/clutch): no load = 0%, pressing = up to 100%.\nUnchecked: no load = 50% (load cell can be pushed and pulled).")
+        for row,label in enumerate([QLabel("Chip"),gainLabel,shiftLabel,QLabel("Invert"),pedalLabel]):
+            chipGrid.addWidget(label,row,0)
+
+        self.gainBoxes = []
+        self.shiftBoxes = []
+        self.invertBoxes = []
+        self.pedalBoxes = []
+        self.sckShare = [1 << i for i in range(self.MAX_CHIPS)] # Chips sharing each chip's SCK pin
+        for i in range(self.MAX_CHIPS):
+            chipGrid.addWidget(QLabel(str(i+1)),0,i+1,Qt.AlignmentFlag.AlignHCenter)
+
+            gainBox = QComboBox()
+            gainBox.currentIndexChanged.connect(lambda idx,chip=i : self.gainChanged(chip,idx))
+            self.gainBoxes.append(gainBox)
+            chipGrid.addWidget(gainBox,1,i+1)
+
+            shiftBox = QSpinBox()
+            shiftBox.setRange(0,15)
+            shiftBox.setValue(8)
+            shiftBox.setToolTip(shiftLabel.toolTip())
+            self.shiftBoxes.append(shiftBox)
+            chipGrid.addWidget(shiftBox,2,i+1)
+
+            cb = QCheckBox()
+            self.invertBoxes.append(cb)
+            chipGrid.addWidget(cb,3,i+1,Qt.AlignmentFlag.AlignHCenter)
+
+            cb = QCheckBox()
+            cb.setToolTip(pedalLabel.toolTip())
+            self.pedalBoxes.append(cb)
+            chipGrid.addWidget(cb,4,i+1,Qt.AlignmentFlag.AlignHCenter)
+
+        chipWidget = QWidget()
+        chipWidget.setLayout(chipGrid)
+        layout.addRow(chipWidget)
+
+        self.autotareCb = QCheckBox("Tare on startup")
+        self.tareButton = QPushButton("Tare now")
+        self.tareButton.setToolTip("Zero all chips with the load cells unloaded")
+        self.tareButton.clicked.connect(lambda : self.send_value("hx711","tare",1))
+        layout.addRow(self.autotareCb,self.tareButton)
+
+        self.statusLabel = QLabel("")
+        layout.addRow("Status:",self.statusLabel)
+        layout.addRow(QLabel("Pins are set by the firmware target (HX711_PINS).\nChips sharing a SCK pin are read together.\nRATE pin: low = 10 SPS, high = 80 SPS."))
+
+        self.setLayout(layout)
+        self.updateInvertBoxes(1)
+
+    def showEvent(self,event):
+        self.timer.start(500)
+
+    def hideEvent(self,event):
+        self.timer.stop()
+
+    def onclose(self):
+        self.timer.stop()
+        self.remove_callbacks()
+
+    def updateInvertBoxes(self,chips):
+        for boxes in (self.gainBoxes,self.shiftBoxes,self.invertBoxes,self.pedalBoxes):
+            for i,w in enumerate(boxes):
+                w.setEnabled(i < chips)
+
+    def gainChanged(self,chip,idx):
+        """Chips on the same SCK pin always use the same channel/gain. Mirror the change to them."""
+        if idx < 0:
+            return
+        for i,box in enumerate(self.gainBoxes):
+            if i != chip and (self.sckShare[chip] >> i) & 1 and box.count() > idx and box.currentIndex() != idx:
+                box.setCurrentIndex(idx)
+
+    def gainInfoCb(self,reply):
+        for box in self.gainBoxes:
+            updateListComboBox(box,reply)
+
+    def sckShareCb(self,chip,mask):
+        self.sckShare[chip] = mask | (1 << chip)
+
+    def maxChipsCb(self,maxchips):
+        self.numChipsBox.setMaximum(maxchips)
+        for i in range(min(maxchips,self.MAX_CHIPS)):
+            self.get_value_async("hx711","sckshare",lambda m,chip=i : self.sckShareCb(chip,m),0,conversion=int,adr=i)
+            self.get_value_async("hx711","gain",self.gainBoxes[i].setCurrentIndex,0,conversion=int,adr=i)
+            self.get_value_async("hx711","shift",self.shiftBoxes[i].setValue,0,conversion=int,adr=i)
+
+    def numChipsChanged(self,chips):
+        self.processingOptions.setChannels(chips)
+        self.numChipsBox.setValue(chips)
+
+    def invertCb(self,mask):
+        for i,cb in enumerate(self.invertBoxes):
+            cb.setChecked((mask >> i) & 1 == 1)
+
+    def pedalCb(self,mask):
+        for i,cb in enumerate(self.pedalBoxes):
+            cb.setChecked((mask >> i) & 1 == 1)
+
+    def updateStatus(self):
+        self.get_value_async("hx711","status",self.statusCb,0,conversion=int)
+
+    def statusCb(self,mask):
+        self.get_value_async("hx711","counts",lambda c : self.countsCb(mask,c),0,conversion=str)
+
+    def countsCb(self,mask,countstr):
+        counts = [c for c in str(countstr).split("\n") if c.strip() != ""]
+        parts = []
+        for i,c in enumerate(counts):
+            state = c if (mask >> i) & 1 else "not connected"
+            parts.append(f"{i+1}: {state}")
+        self.statusLabel.setText("  ".join(parts))
+
+    def apply(self):
+        self.send_value("hx711","chips",self.numChipsBox.value())
+        for i in range(self.numChipsBox.value()):
+            if self.gainBoxes[i].currentData() is not None:
+                self.send_value("hx711","gain",int(self.gainBoxes[i].currentData()),adr=i)
+            self.send_value("hx711","shift",self.shiftBoxes[i].value(),adr=i)
+        mask = 0
+        for i,cb in enumerate(self.invertBoxes):
+            if cb.isChecked():
+                mask |= 1 << i
+        self.send_value("hx711","invert",mask)
+        mask = 0
+        for i,cb in enumerate(self.pedalBoxes):
+            if cb.isChecked():
+                mask |= 1 << i
+        self.send_value("hx711","pedal",mask)
+        self.send_value("hx711","autotare",1 if self.autotareCb.isChecked() else 0)
+        self.processingOptions.setChannels(self.numChipsBox.value())
+        self.processingOptions.apply()
+
+    def readValues(self):
+        self.processingOptions.readValues()
+        self.get_value_async("hx711","maxchips",self.maxChipsCb,0,conversion=int)
+        self.get_value_async("hx711","gain",self.gainInfoCb,0,typechar='!')
+        self.get_value_async("hx711","invert",self.invertCb,0,conversion=int)
+        self.get_value_async("hx711","pedal",self.pedalCb,0,conversion=int)
+        self.get_value_async("hx711","autotare",self.autotareCb.setChecked,0,conversion=int)
+        self.get_value_async("hx711","chips",self.numChipsChanged,0,conversion=int)
